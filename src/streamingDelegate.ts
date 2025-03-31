@@ -190,11 +190,11 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     return resInfo
   }
 
-  fetchSnapshot(snapFilter?: string): Promise<Buffer> {
+  fetchSnapshot(request: SnapshotRequest): Promise<Buffer> {
     this.snapshotPromise = new Promise((resolve, reject) => {
       const startTime = Date.now()
       const ffmpegArgs = `${this.videoConfig.stillImageSource || this.videoConfig.source! // Still
-      } -frames:v 1${snapFilter ? ` -filter:v ${snapFilter}` : ''
+      } -frames:v 1${(request.width && request.height) ? ` -filter:v scale=${request.width}:${request.height}` : ''
       } -f image2 -`
       + ` -hide_banner`
       + ` -loglevel error`
@@ -244,29 +244,6 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     return this.snapshotPromise
   }
 
-  resizeSnapshot(snapshot: Buffer, resizeFilter?: string): Promise<Buffer> {
-    return new Promise<Buffer>((resolve, reject) => {
-      const ffmpegArgs = `-i pipe:` // Resize
-        + ` -frames:v 1${resizeFilter ? ` -filter:v ${resizeFilter}` : ''
-        } -f image2 -`
-
-      this.log.debug(`Resize command: ${this.videoProcessor} ${ffmpegArgs}`, this.cameraName, this.videoConfig.debug)
-      const ffmpeg = spawn(this.videoProcessor, ffmpegArgs.split(/\s+/), { env })
-
-      let resizeBuffer = Buffer.alloc(0)
-      ffmpeg.stdout.on('data', (data) => {
-        resizeBuffer = Buffer.concat([resizeBuffer, data])
-      })
-      ffmpeg.on('error', (error: Error) => {
-        reject(new Error(`FFmpeg process creation failed: ${error.message}`))
-      })
-      ffmpeg.on('close', () => {
-        resolve(resizeBuffer)
-      })
-      ffmpeg.stdin.end(snapshot)
-    })
-  }
-
   async handleSnapshotRequest(request: SnapshotRequest, callback: SnapshotRequestCallback): Promise<void> {
     const resolution = this.determineResolution(request, true)
 
@@ -275,13 +252,12 @@ export class StreamingDelegate implements CameraStreamingDelegate {
 
       this.log.debug(`Snapshot requested: ${request.width} x ${request.height}`, this.cameraName, this.videoConfig.debug)
 
-      const snapshot = await (this.snapshotPromise || this.fetchSnapshot(resolution.snapFilter))
+      const snapshot = await (this.snapshotPromise || this.fetchSnapshot(reques))
 
       this.log.debug(`Sending snapshot: ${resolution.width > 0 ? resolution.width : 'native'} x ${resolution.height > 0 ? resolution.height : 'native'
       }${cachedSnapshot ? ' (cached)' : ''}`, this.cameraName, this.videoConfig.debug)
 
-      const resized = await this.resizeSnapshot(snapshot, resolution.resizeFilter)
-      callback(undefined, resized)
+      callback(undefined, snapshot)
     } catch (err) {
       this.log.error(err as string, this.cameraName)
       callback(err as Error)
